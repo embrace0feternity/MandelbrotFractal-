@@ -7,13 +7,14 @@
 #include <SFML/Graphics.hpp>
 
 #include <exec/any_sender_of.hpp>
-#include <exec/repeat_effect_until.hpp>
+#include <exec/repeat_until.hpp>
 #include <exec/static_thread_pool.hpp>
 #include <stdexec/execution.hpp>
 
 #include "mandelbrot_sender.hpp"
 #include "sfml_display_sender.hpp"
 #include "sfml_events_handler.hpp"
+#include "types_core.hpp"
 #include "types_sfml.hpp"
 
 using namespace std::chrono_literals;
@@ -41,6 +42,25 @@ private:
     const std::chrono::milliseconds frame_time_ = 1ms;
 };
 
+///
+///
+///
+
+template <typename SenderType>
+auto makeAnySender(SenderType&& sender) {
+    return exec::any_receiver_ref<
+        ex::completion_signatures<
+            ex::set_value_t(),
+            ex::set_error_t(std::exception_ptr),
+            ex::set_stopped_t()
+        >
+    >::any_sender<>{std::forward<SenderType>(sender)};
+}
+
+///
+///
+///
+
 class MandelbrotApp {
 public:
     MandelbrotApp() : compute_pool_{std::max(1u, std::thread::hardware_concurrency())}, sfml_thread_{1} {
@@ -59,10 +79,32 @@ public:
                    }));
         ex::sync_wait(std::move(initialize));
 
-        auto process_frame = ex::just(); // Ваш код здесь
+        auto compute_sender = ex::starts_on(compute_sched,
+                mandelbrot::MakeComputeSender(state_->render_settings, state_->app_state.viewport)
+            );
+
+        auto display_sender = compute_sender | render::MakeSfmlDisplaySender(*state_);
+
+        auto render_pipeline = display_sender |
+            ex::then([this]{ state_->app_state.need_rerender = false; }) |
+            ex::then([]{ 
+                FrameClock frameClock;
+                WaitForFPS{frameClock, static_cast<std::uint32_t>(WaitForFPS::TARGET_FPS)}();
+            });
+
+        auto process_frame =
+            ex::just(SfmlEventHandler{state_->window, state_->render_settings, state_->app_state}) |
+            ex::let_value([this, render_pipeline = std::move(render_pipeline)](auto) {
+                if (!state_->app_state.need_rerender) {
+                    /// Use makeAnySender as a type erasure, because
+                    ///  ex::just and render_pipeline are incompatible
+                    return makeAnySender(ex::just());
+                }
+                return makeAnySender(render_pipeline);
+            });
 
         auto repeated_pipeline = std::move(process_frame) | ex::then([this] { return state_->app_state.should_exit; }) |
-                                 exec::repeat_effect_until();
+                                 exec::repeat_until();
         ex::sync_wait(std::move(repeated_pipeline));
     }
 

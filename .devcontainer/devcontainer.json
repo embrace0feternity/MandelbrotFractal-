@@ -2,12 +2,11 @@
   "name": "Ubuntu25.04 with GCC15",
   "build": {
       "dockerfile": "./Dockerfile",
-      "context": ".",
-      "args": {
-        "USER_UID": "${localEnv:USER_UID}",
-        "USER_GID": "${localEnv:USER_GID}"
-      }
+      "context": "."
   },
+  "runArgs": [
+    "--cap-add=PERFMON",
+  ],
   "workspaceFolder": "/workspaces/${localWorkspaceFolderBasename}",
   "remoteUser": "dev",
   "postStartCommand": "conan profile detect || true",
@@ -24,7 +23,7 @@
     }
   },
   "mounts": [
-    "source=${env:HOME}/.gitconfig,target=/home/dev/.gitconfig,type=bind,consistency=cached",
-    "source=${env:HOME}/.conan2,target=/home/dev/.conan2,type=bind,consistency=cached"
-  ]
+    "source=conan_cache,target=/home/dev/.conan2,type=volume"
+  ],
+  "updateRemoteUserUID": true
 }
