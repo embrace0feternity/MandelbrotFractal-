@@ -42,6 +42,25 @@ private:
     const std::chrono::milliseconds frame_time_ = 1ms;
 };
 
+///
+///
+///
+
+template <typename SenderType>
+auto makeAnySender(SenderType&& sender) {
+    return exec::any_receiver_ref<
+        ex::completion_signatures<
+            ex::set_value_t(),
+            ex::set_error_t(std::exception_ptr),
+            ex::set_stopped_t()
+        >
+    >::any_sender<>{std::forward<SenderType>(sender)};
+}
+
+///
+///
+///
+
 class MandelbrotApp {
 public:
     MandelbrotApp() : compute_pool_{std::max(1u, std::thread::hardware_concurrency())}, sfml_thread_{1} {
@@ -60,21 +79,28 @@ public:
                    }));
         ex::sync_wait(std::move(initialize));
 
+        auto compute_sender = ex::starts_on(compute_sched,
+                mandelbrot::MakeComputeSender(state_->render_settings, state_->app_state.viewport)
+            );
+
+        auto display_sender = compute_sender | render::MakeSfmlDisplaySender(*state_);
+
+        auto render_pipeline = display_sender |
+            ex::then([this]{ state_->app_state.need_rerender = false; }) |
+            ex::then([]{ 
+                FrameClock frameClock;
+                WaitForFPS{frameClock, static_cast<std::uint32_t>(WaitForFPS::TARGET_FPS)}();
+            });
+
         auto process_frame =
             ex::just(SfmlEventHandler{state_->window, state_->render_settings, state_->app_state}) |
-            ex::let_value([this](auto) {
-                return ex::just() | ex::then([this]() {
-                    if (!state_->app_state.need_rerender) {
-                        return;
-                    }
-                    
-                    FrameClock frameClock;
-                    ex::sync_wait(
-                        mandelbrot::MakeComputeSender(state_->render_settings, state_->app_state.viewport) |
-                        render::MakeSfmlDisplaySender(*state_) |
-                        ex::then([this]() { state_->app_state.need_rerender = false; }) |
-                        ex::then(WaitForFPS{frameClock, static_cast<unsigned int>(WaitForFPS::TARGET_FPS)}));
-                });
+            ex::let_value([this, render_pipeline = std::move(render_pipeline)](auto) {
+                if (!state_->app_state.need_rerender) {
+                    /// Use makeAnySender as a type erasure, because
+                    ///  ex::just and render_pipeline are incompatible
+                    return makeAnySender(ex::just());
+                }
+                return makeAnySender(render_pipeline);
             });
 
         auto repeated_pipeline = std::move(process_frame) | ex::then([this] { return state_->app_state.should_exit; }) |
