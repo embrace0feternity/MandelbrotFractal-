@@ -10,7 +10,8 @@ class SenderModelAppConan(ConanFile):
     settings = "os", "compiler", "build_type", "arch"
     
     def requirements(self):
-        self.requires("gtest/1.13.0")
+        self.requires("gtest/1.17.0")
+        self.requires("sfml/2.5.1")
         self.tool_requires("cmake/3.30.0")
     
     def layout(self):

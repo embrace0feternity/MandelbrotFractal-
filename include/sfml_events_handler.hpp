@@ -5,9 +5,10 @@
 
 #include "types_core.hpp"
 
+namespace ex = stdexec;
+
 class SfmlEventHandler {
 public:
-
     template <typename Receiver>
     struct OperationState {
         Receiver receiver_;
@@ -21,19 +22,29 @@ public:
         explicit OperationState(R &&r, sf::RenderWindow &window, RenderSettings render_settings, AppState &state)
             : receiver_{std::forward<R>(r)}, window_{window}, render_settings_{render_settings}, state_{state} {}
 
-        /* Ваш код метода start() здесь */
+        void start() noexcept {
+            HandleEvents();
+            HandleAutoZoom();
+            ex::set_value(std::move(receiver_));
+        }
 
-    private:
+    protected:
         void HandleEvents() {
             sf::Event event;
             while (window_.pollEvent(event)) {
                 switch (event.type) {
                 case sf::Event::Closed:
-                state_.should_exit = true;
-                break;
-
-                /* Ваш код здесь  */
-
+                    state_.should_exit = true;
+                    break;
+                case sf::Event::KeyPressed:
+                    HandleKeyPress(event.key);
+                    break;
+                case sf::Event::MouseButtonPressed:
+                    HandleMousePress(event.mouseButton);
+                    break;
+                case sf::Event::MouseButtonReleased:
+                    HandleMouseRelease(event.mouseButton);
+                    break;
                 default:
                     break;
                 }
@@ -41,23 +52,61 @@ public:
         }
 
         void HandleKeyPress(const sf::Event::KeyEvent &key) {
-            /* Ваш код здесь */
+            switch (key.code) {
+            case sf::Keyboard::C:
+                state_.viewport = AppState::INITIAL_VIEWPORT;
+                state_.need_rerender = true;
+                state_.zoom_clock.restart();
+                break;
+            case sf::Keyboard::X:
+                state_.auto_zoom_enabled = !state_.auto_zoom_enabled;
+                state_.zoom_clock.restart();
+                break;
+            default:
+                break;
+            }
         }
 
         void HandleMousePress(const sf::Event::MouseButtonEvent &mouse) {
-            /* Ваш код здесь */
+            if (mouse.button == sf::Mouse::Left) {
+                state_.left_mouse_pressed = true;
+                ZoomToPoint(mouse.x, mouse.y, true);
+                state_.need_rerender = true;
+            } 
+            else if (mouse.button == sf::Mouse::Right) {
+                state_.right_mouse_pressed = true;
+                ZoomToPoint(mouse.x, mouse.y, false);
+                state_.need_rerender = true;
+            }
         }
 
         void HandleMouseRelease(const sf::Event::MouseButtonEvent &mouse) {
             if (mouse.button == sf::Mouse::Left) {
                 state_.left_mouse_pressed = false;
-            } else if (mouse.button == sf::Mouse::Right) {
+            } 
+            else if (mouse.button == sf::Mouse::Right) {
                 state_.right_mouse_pressed = false;
             }
         }
 
         void HandleAutoZoom() {
-            /* Ваш код здесь */
+            if (!state_.auto_zoom_enabled) {
+                return;
+            }
+
+            if (state_.zoom_clock.getElapsedTime().asMilliseconds() < ZOOM_INTERVAL_MS) {
+                return;
+            }
+
+            state_.zoom_clock.restart();
+            auto px = (AppState::AUTO_ZOOM_TARGET_X - state_.viewport.x_min) /
+                                            state_.viewport.width() * render_settings_.width;
+
+            auto py = (AppState::AUTO_ZOOM_TARGET_Y - state_.viewport.y_min) /
+                                            state_.viewport.height() * render_settings_.height;
+
+            state_.need_rerender = true;
+            ZoomToPoint(px, py, true);
         }
 
         void ZoomToPoint(int pixel_x, int pixel_y, bool zoom_in, double factor = 0.8) {
@@ -69,8 +118,11 @@ public:
             const double zoom_factor = zoom_in ? factor : (1.0 / factor);
             const double new_width = state_.viewport.width() * zoom_factor;
             const double new_height = state_.viewport.height() * zoom_factor;
-            
-            /* Ваш код обновления state_ здесь  */
+
+            state_.viewport.x_min = target_x - new_width / 2.0;
+            state_.viewport.x_max = target_x + new_width / 2.0;
+            state_.viewport.y_min = target_y - new_height / 2.0;
+            state_.viewport.y_max = target_y + new_height / 2.0;
         }
     };
 
@@ -81,6 +133,17 @@ public:
     SfmlEventHandler(sf::RenderWindow &window, RenderSettings render_settings, AppState &state)
         : window_{window}, render_settings_{render_settings}, state_{state} {}
 
-    /* Ваш код методов connect() и get_completion_signatures() здесь */
+    template <typename Receiver>
+    auto connect(Receiver &&receiver) const {
+        return OperationState<std::decay_t<Receiver>>{
+            std::forward<Receiver>(receiver), 
+            window_,
+            render_settings_,
+            state_
+        };
+    }
 
+    auto get_completion_signatures() const {
+        return ex::completion_signatures<ex::set_value_t(), ex::set_error_t(std::exception_ptr), ex::set_stopped_t()>{};
+    }
 };

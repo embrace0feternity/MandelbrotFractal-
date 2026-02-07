@@ -14,8 +14,14 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
 endif()
 
 # Ищем необходимые библиотеки
-find_package(GTest REQUIRED)
-find_package(SFML COMPONENTS graphics window system REQUIRED)
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(SFML REQUIRED IMPORTED_TARGET 
+    sfml-system 
+    sfml-window 
+    sfml-graphics 
+    sfml-audio 
+    sfml-network
+)
 
 include(FetchContent)
 FetchContent_Declare(
@@ -24,6 +30,14 @@ FetchContent_Declare(
   GIT_TAG origin/master
 )
 FetchContent_MakeAvailable(CPM)
+
+FetchContent_Declare(
+  googletest
+  URL https://github.com/google/googletest/archive/03597a01ee50ed33e9dfd640b249b4be3799d395.zip
+)
+
+set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
+FetchContent_MakeAvailable(googletest)
 
 CPMAddPackage(
     NAME stdexec
@@ -54,19 +68,19 @@ target_link_libraries(${PROJECT_NAME}_imp PUBLIC
 
 # Создаём исполняемый таргет и линкуем к нему статическую библиотеку
 add_executable(${PROJECT_NAME} "${CMAKE_SOURCE_DIR}/src/main.cpp")
-target_link_libraries(${PROJECT_NAME} PUBLIC ${PROJECT_NAME}_imp)
+target_link_libraries(${PROJECT_NAME} PUBLIC ${PROJECT_NAME}_imp sfml-graphics sfml-window sfml-system)
 
 #
 # Тесты
 #
-# Рекурсивно ищем все используемые в тестах .cpp файлы
-file(GLOB TEST_SRC_FILES "${CMAKE_SOURCE_DIR}/tests/*.cpp")
-
-add_executable(${PROJECT_NAME}_tests "${TEST_SRC_FILES}")
+add_executable(${PROJECT_NAME}_tests 
+    ${CMAKE_CURRENT_LIST_DIR}/tests/main.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/tests/mandelbrottest.cpp
+)
 target_link_libraries(${PROJECT_NAME}_tests PRIVATE
     ${PROJECT_NAME}_imp
-    GTest::GTest
-    GTest::Main
+    gtest_main
+    gmock
     STDEXEC::stdexec
     sfml-graphics sfml-window sfml-system)
 
